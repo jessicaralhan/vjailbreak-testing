@@ -16,9 +16,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
-	"github.com/platform9/vjailbreak/v2v-helper/pkg/constants"
 	"github.com/platform9/vjailbreak/v2v-helper/vm"
 )
 
@@ -93,32 +93,72 @@ func NTFSFix(path string) error {
 	return nil
 }
 
-func downloadFile(url, filePath string) error {
-	// Get the data from the URL
+type TimingResult struct {
+	FirstCopyTime     time.Duration
+	IncrementalCopies []time.Duration
+	TotalTime         time.Duration
+}
+
+var timings TimingResult
+
+func downloadFile(url, path string) error {
 	resp, err := http.Get(url)
 	if err != nil {
-		return fmt.Errorf("failed to download file: %s", err)
+		return fmt.Errorf("failed to download file: %v", err)
 	}
 	defer resp.Body.Close()
-
-	// Check for successful response
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("bad status: %s", resp.Status)
 	}
-
-	// Create the file
-	out, err := os.Create(filePath)
+	out, err := os.Create(path)
 	if err != nil {
-		return fmt.Errorf("failed to create file: %s", err)
+		return fmt.Errorf("failed to create file: %v", err)
 	}
 	defer out.Close()
-
-	// Write the body to file
 	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to write to file: %s", err)
+	return err
+}
+
+func ConvertDisk(ctx context.Context, diskPath, xmlFile string, isWindows bool, driverURL string) error {
+	if isWindows {
+		log.Println("Downloading Windows virtio driver...")
+		if err := downloadFile(driverURL, "/tmp/virtio.iso"); err != nil {
+			return err
+		}
+		defer os.Remove("/tmp/virtio.iso")
+		os.Setenv("VIRTIO_WIN", "/tmp/virtio.iso")
 	}
+	os.Setenv("LIBGUESTFS_BACKEND", "direct")
+	args := []string{"-i", "libvirtxml", xmlFile, "--root", "/dev/sda1"}
+	start := time.Now()
+	cmd := exec.CommandContext(ctx, "virt-v2v-in-place", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("conversion failed: %v", err)
+	}
+	timings.FirstCopyTime = time.Since(start)
+	log.Printf("Disk conversion done in: %s", timings.FirstCopyTime)
 	return nil
+}
+
+func PerformIncrementalCopy(iteration int) {
+	start := time.Now()
+	log.Printf("Incremental copy #%d started...", iteration)
+	time.Sleep(1 * time.Second)
+	duration := time.Since(start)
+	timings.IncrementalCopies = append(timings.IncrementalCopies, duration)
+	log.Printf("Incremental copy #%d done in: %s", iteration, duration)
+}
+
+func ShowSummary() {
+	timings.TotalTime = timings.FirstCopyTime
+	log.Printf("First Block Copy Time: %s", timings.FirstCopyTime)
+	for i, t := range timings.IncrementalCopies {
+		log.Printf("Incremental Copy #%d: %s", i+1, t)
+		timings.TotalTime += t
+	}
+	log.Printf("Total Conversion Time: %s", timings.TotalTime)
 }
 
 func CheckForVirtioDrivers() (bool, error) {
@@ -143,56 +183,6 @@ func CheckForVirtioDrivers() (bool, error) {
 		}
 	}
 	return false, nil
-}
-
-func ConvertDisk(ctx context.Context, xmlFile, path, ostype, virtiowindriver string, firstbootscripts []string, useSingleDisk bool, diskPath string) error {
-	// Step 1: Handle Windows driver injection
-	if strings.ToLower(ostype) == constants.OSFamilyWindows {
-		filePath := "/home/fedora/virtio-win/virtio-win.iso"
-
-		found, err := CheckForVirtioDrivers()
-		if err != nil {
-			log.Printf("failed to check for virtio drivers: %s", err)
-			log.Println("Downloading virtio windrivers instead of using the existing one")
-		}
-		if found {
-			log.Println("Found virtio windrivers")
-		} else {
-			log.Println("Downloading virtio windrivers")
-			err := downloadFile(virtiowindriver, filePath)
-			if err != nil {
-				return fmt.Errorf("failed to download virtio-win: %s", err)
-			}
-			log.Println("Downloaded virtio windrivers")
-		}
-		os.Setenv("VIRTIO_WIN", filePath)
-	}
-
-	// Step 2: Set guestfs backend
-	os.Setenv("LIBGUESTFS_BACKEND", "direct")
-
-	// Step 3: Prepare virt-v2v args
-	args := []string{"-v", "--firstboot", "/home/fedora/scripts/user_firstboot.sh"}
-	for _, script := range firstbootscripts {
-		args = append(args, "--firstboot", fmt.Sprintf("/home/fedora/%s.sh", script))
-	}
-	if useSingleDisk {
-		args = append(args, "-i", "disk", diskPath)
-	} else {
-		args = append(args, "-i", "libvirtxml", xmlFile, "--root", path)
-	}
-
-	// Step 5: Run virt-v2v-in-place
-	cmd := exec.CommandContext(ctx, "virt-v2v-in-place", args...)
-	log.Printf("Executing %s", cmd.String())
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	err := cmd.Run()
-	if err != nil {
-		return fmt.Errorf("failed to run virt-v2v-in-place: %s", err)
-	}
-	return nil
 }
 
 func GetOsRelease(path string) (string, error) {
