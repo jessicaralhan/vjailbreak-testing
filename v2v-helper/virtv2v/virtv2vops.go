@@ -128,17 +128,26 @@ func ConvertDisk(ctx context.Context, diskPath, xmlFile string, isWindows bool, 
 		defer os.Remove("/tmp/virtio.iso")
 		os.Setenv("VIRTIO_WIN", "/tmp/virtio.iso")
 	}
+
 	os.Setenv("LIBGUESTFS_BACKEND", "direct")
 	args := []string{"-i", "libvirtxml", xmlFile, "--root", "/dev/sda1"}
+
 	start := time.Now()
+	var err error
+	defer func() {
+		timings.FirstCopyTime = time.Since(start)
+		log.Printf("Disk conversion done in: %s, error: %v", timings.FirstCopyTime, err)
+	}()
+
 	cmd := exec.CommandContext(ctx, "virt-v2v-in-place", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+
+	err = cmd.Run()
+	if err != nil {
 		return fmt.Errorf("conversion failed: %v", err)
 	}
-	timings.FirstCopyTime = time.Since(start)
-	log.Printf("Disk conversion done in: %s", timings.FirstCopyTime)
+
 	return nil
 }
 
