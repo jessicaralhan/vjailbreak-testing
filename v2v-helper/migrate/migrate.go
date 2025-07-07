@@ -127,7 +127,7 @@ func (migobj *Migrate) DetachAllVolumes(vminfo vm.VMInfo) error {
 	for _, vmdisk := range vminfo.VMDisks {
 
 		if err := openstackops.DetachVolumeFromVM(vmdisk.OpenstackVol.ID); err != nil && !strings.Contains(err.Error(), "is not attached to volume") {
-			return errors.Wrap(err, "failed to detach all volumes from VM")
+			return errors.Wrap(err, "failed to detach volume from VM")
 		}
 
 		err := openstackops.WaitForVolume(vmdisk.OpenstackVol.ID)
