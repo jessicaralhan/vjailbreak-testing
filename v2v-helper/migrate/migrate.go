@@ -127,7 +127,7 @@ func (migobj *Migrate) DetachAllVolumes(vminfo vm.VMInfo) error {
 	for _, vmdisk := range vminfo.VMDisks {
 
 		if err := openstackops.DetachVolumeFromVM(vmdisk.OpenstackVol.ID); err != nil && !strings.Contains(err.Error(), "is not attached to volume") {
-			return errors.Wrap(err, "failed to detach volume from VM")
+			return errors.Wrap(err, "failed to detach all volumes from VM")
 		}
 
 		err := openstackops.WaitForVolume(vmdisk.OpenstackVol.ID)
@@ -270,6 +270,10 @@ func (migobj *Migrate) LiveReplicateDisks(ctx context.Context, vminfo vm.VMInfo)
 		// If its the first copy, copy the entire disk
 		if incrementalCopyCount == 0 {
 			for idx := range vminfo.VMDisks {
+				if idx == 0 {
+					startTime := time.Now()
+					migobj.logMessage(fmt.Sprintf("Starting first full disk copy at: %s", startTime.Format(time.RFC3339)))
+				}
 				err = nbdops[idx].CopyDisk(ctx, vminfo.VMDisks[idx].Path, idx)
 				if err != nil {
 					return vminfo, fmt.Errorf("failed to copy disk: %s", err)
@@ -313,12 +317,20 @@ func (migobj *Migrate) LiveReplicateDisks(ctx context.Context, vminfo vm.VMInfo)
 					done = false
 					changedBlockCopySuccess := true
 					migobj.logMessage("Copying changed blocks")
+					// incremental block copy
+					{
+						startTime := time.Now()
+						migobj.logMessage(fmt.Sprintf("Started incremental block copy at: %s for disk %d", startTime.Format(time.RFC3339), idx))
 
-					err = nbdops[idx].CopyChangedBlocks(ctx, changedAreas, vminfo.VMDisks[idx].Path)
-					if err != nil {
-						changedBlockCopySuccess = false
+						err = nbdops[idx].CopyChangedBlocks(ctx, changedAreas, vminfo.VMDisks[idx].Path)
+
+						endTime := time.Now()
+						migobj.logMessage(fmt.Sprintf("Finished incremental block copy at: %s for disk %d", endTime.Format(time.RFC3339), idx))
+
+						if err != nil {
+							changedBlockCopySuccess = false
+						}
 					}
-
 					err = vmops.UpdateDiskInfo(&vminfo, vminfo.VMDisks[idx], changedBlockCopySuccess)
 					if err != nil {
 						return vminfo, fmt.Errorf("failed to update disk info: %s", err)
