@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/platform9/vjailbreak/v2v-helper/pkg/constants"
@@ -184,6 +185,7 @@ func ConvertDisk(ctx context.Context, xmlFile, path, ostype, virtiowindriver str
 		args = append(args, "-i", "libvirtxml", xmlFile, "--root", path)
 	}
 
+	start := time.Now()
 	// Step 5: Run virt-v2v-in-place
 	cmd := exec.CommandContext(ctx, "virt-v2v-in-place", args...)
 	log.Printf("Executing %s", cmd.String())
@@ -191,9 +193,12 @@ func ConvertDisk(ctx context.Context, xmlFile, path, ostype, virtiowindriver str
 	cmd.Stderr = os.Stderr
 
 	err := cmd.Run()
+	duration := time.Since(start)
+
 	if err != nil {
 		return fmt.Errorf("failed to run virt-v2v-in-place: %s", err)
 	}
+	log.Printf("virt-v2v-in-place conversion took: %s", duration)
 	return nil
 }
 

@@ -271,11 +271,15 @@ func (migobj *Migrate) LiveReplicateDisks(ctx context.Context, vminfo vm.VMInfo)
 		// If its the first copy, copy the entire disk
 		if incrementalCopyCount == 0 {
 			for idx := range vminfo.VMDisks {
+				startTime := time.Now()
+				migobj.logMessage(fmt.Sprintf("Starting full disk copy of disk %d ", idx))
+
 				err = nbdops[idx].CopyDisk(ctx, vminfo.VMDisks[idx].Path, idx)
 				if err != nil {
 					return vminfo, fmt.Errorf("failed to copy disk: %s", err)
 				}
-				migobj.logMessage(fmt.Sprintf("Disk %d copied successfully: %s", idx, vminfo.VMDisks[idx].Path))
+				duration := time.Since(startTime)
+				migobj.logMessage(fmt.Sprintf("Disk %d (%s) copied successfully in %s, copying changed blocks now", idx, vminfo.VMDisks[idx].Path, duration))
 			}
 		} else {
 			migration_snapshot, err := vmops.GetSnapshot(constants.MigrationSnapshotName)
@@ -314,8 +318,15 @@ func (migobj *Migrate) LiveReplicateDisks(ctx context.Context, vminfo vm.VMInfo)
 					done = false
 					changedBlockCopySuccess := true
 					migobj.logMessage("Copying changed blocks")
+					// incremental block copy
+
+					startTime := time.Now()
+					migobj.logMessage(fmt.Sprintf("Starting incremental block copy for disk %d at %s", idx, startTime))
 
 					err = nbdops[idx].CopyChangedBlocks(ctx, changedAreas, vminfo.VMDisks[idx].Path)
+
+					duration := time.Since(startTime)
+
 					if err != nil {
 						changedBlockCopySuccess = false
 					}
@@ -326,10 +337,11 @@ func (migobj *Migrate) LiveReplicateDisks(ctx context.Context, vminfo vm.VMInfo)
 					}
 					if !changedBlockCopySuccess {
 						migobj.logMessage(fmt.Sprintf("Failed to copy changed blocks: %s", err))
-						migobj.logMessage(fmt.Sprintf("Since full copy has completed, Retrying copy of changed block	s for disk: %d", idx))
+						migobj.logMessage(fmt.Sprintf("Since full copy has completed, Retrying copy of changed blocks for disk: %d", idx))
 					}
-					migobj.logMessage("Finished copying changed blocks")
-					migobj.logMessage(fmt.Sprintf("Syncing Changed blocks [%d/20]", incrementalCopyCount))
+
+					migobj.logMessage(fmt.Sprintf("Finished copying and syncing changed blocks for disk %d in %s [Progress: %d/20]", idx, duration, incrementalCopyCount))
+
 				}
 			}
 			if final {
@@ -465,7 +477,7 @@ func (migobj *Migrate) ConvertVolumes(ctx context.Context, vminfo vm.VMInfo) err
 			}
 			osRelease, err = virtv2v.RunCommandInGuestAllVolumes(vminfo.VMDisks, "cat", false, "/etc/os-release")
 			if err != nil {
-				return fmt.Errorf("failed to get os release: %s: %s\n", err, strings.TrimSpace(osRelease))
+				return fmt.Errorf("failed to get os release: %s: %s", err, strings.TrimSpace(osRelease))
 			}
 		}
 		osDetected := strings.ToLower(strings.TrimSpace(osRelease))
@@ -769,7 +781,7 @@ func (migobj *Migrate) pingVM(ips []string) error {
 		if pinger.Statistics().PacketLoss == 0 {
 			migobj.logMessage("Ping succeeded")
 		} else {
-			return fmt.Errorf("Ping failed")
+			return fmt.Errorf("ping failed")
 		}
 	}
 	return nil
@@ -798,7 +810,7 @@ func (migobj *Migrate) checkHTTPGet(ips []string, port string) error {
 		}
 
 		// Both HTTP and HTTPS failed
-		return fmt.Errorf("Both HTTP and HTTPS failed for %s:%s", ip, port)
+		return fmt.Errorf("both HTTP and HTTPS failed for %s:%s", ip, port)
 	}
 
 	return nil
