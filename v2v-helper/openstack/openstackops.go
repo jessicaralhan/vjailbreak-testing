@@ -4,10 +4,8 @@ package openstack
 
 import (
 	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"time"
 
@@ -47,24 +45,6 @@ type OpenstackOperations interface {
 	WaitUntilVMActive(vmID string) (bool, error)
 }
 
-func getCert(endpoint string) (*x509.Certificate, error) {
-	conf := &tls.Config{
-		InsecureSkipVerify: true,
-	}
-	parsedURL, err := url.Parse(endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing URL: %w", err)
-	}
-	hostname := parsedURL.Hostname()
-	conn, err := tls.Dial("tcp", hostname+":443", conf)
-	if err != nil {
-		return nil, fmt.Errorf("error connecting to %s: %w", hostname, err)
-	}
-	defer conn.Close()
-	cert := conn.ConnectionState().PeerCertificates[0]
-	return cert, nil
-}
-
 func validateOpenStack(insecure bool) (*utils.OpenStackClients, error) {
 	opts, err := openstack.AuthOptionsFromEnv()
 	if err != nil {
@@ -80,18 +60,6 @@ func validateOpenStack(insecure bool) (*utils.OpenStackClients, error) {
 	}
 	if insecure {
 		tlsConfig.InsecureSkipVerify = true
-	} else {
-		// Get the certificate for the Openstack endpoint
-		caCert, err := getCert(opts.IdentityEndpoint)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get certificate: %s", err)
-		}
-		caCertPool, _ := x509.SystemCertPool()
-		if caCertPool == nil {
-			caCertPool = x509.NewCertPool()
-		}
-		caCertPool.AddCert(caCert)
-		tlsConfig.RootCAs = caCertPool
 	}
 	transport := &http.Transport{
 		TLSClientConfig: tlsConfig,

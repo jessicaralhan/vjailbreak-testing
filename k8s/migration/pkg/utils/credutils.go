@@ -4,7 +4,6 @@ package utils
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -141,30 +140,6 @@ func GetOpenstackCredentialsFromSecret(ctx context.Context, k3sclient client.Cli
 		TenantName: fields["TenantName"],
 		Insecure:   insecure,
 	}, nil
-}
-
-// GetCert retrieves an X.509 certificate from an endpoint
-func GetCert(endpoint string) (*x509.Certificate, error) {
-	conf := &tls.Config{
-		//nolint:gosec // This is required to skip certificate verification
-		InsecureSkipVerify: true,
-	}
-	parsedURL, err := url.Parse(endpoint)
-	if err != nil {
-		return nil, errors.Wrap(err, "error parsing URL")
-	}
-	hostname := parsedURL.Hostname()
-	conn, err := tls.Dial("tcp", hostname+":443", conf)
-	if err != nil {
-		return nil, errors.Wrapf(err, "error connecting to %s", hostname)
-	}
-	defer func() {
-		if err := conn.Close(); err != nil {
-			ctrllog.Log.Info("Error closing connection", "error", err)
-		}
-	}()
-	cert := conn.ConnectionState().PeerCertificates[0]
-	return cert, nil
 }
 
 // VerifyNetworks verifies the existence of specified networks in OpenStack
@@ -364,22 +339,6 @@ func ValidateAndGetProviderClient(ctx context.Context, k3sclient client.Client,
 	}
 	if openstackCredential.Insecure {
 		tlsConfig.InsecureSkipVerify = true
-	} else {
-		// Get the certificate for the Openstack endpoint
-		caCert, certerr := GetCert(openstackCredential.AuthURL)
-		if certerr != nil {
-			return nil, errors.Wrap(certerr, "failed to get certificate for openstack")
-		}
-		// Trying to fetch the system cert pool and add the Openstack certificate to it
-		caCertPool, err := x509.SystemCertPool()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get system cert pool: %w", err)
-		}
-		if caCertPool == nil {
-			caCertPool = x509.NewCertPool()
-		}
-		caCertPool.AddCert(caCert)
-		tlsConfig.RootCAs = caCertPool
 	}
 	transport := &http.Transport{
 		TLSClientConfig: tlsConfig,

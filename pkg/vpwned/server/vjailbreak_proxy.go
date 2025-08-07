@@ -3,10 +3,8 @@ package server
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"net/http"
-	"net/url"
 
 	gophercloud "github.com/gophercloud/gophercloud"
 	openstack "github.com/gophercloud/gophercloud/openstack"
@@ -133,22 +131,6 @@ func ValidateAndGetProviderClient(openstackAccessInfo *api.OpenstackAccessInfo) 
 	}
 	if openstackAccessInfo.Insecure {
 		tlsConfig.InsecureSkipVerify = true
-	} else {
-		// Get the certificate for the Openstack endpoint
-		caCert, certerr := GetCert(openstackAccessInfo.AuthUrl)
-		if certerr != nil {
-			return nil, certerr
-		}
-		// Trying to fetch the system cert pool and add the Openstack certificate to it
-		caCertPool, err := x509.SystemCertPool()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get system cert pool: %w", err)
-		}
-		if caCertPool == nil {
-			caCertPool = x509.NewCertPool()
-		}
-		caCertPool.AddCert(caCert)
-		tlsConfig.RootCAs = caCertPool
 	}
 	transport := &http.Transport{
 		TLSClientConfig: tlsConfig,
@@ -168,25 +150,6 @@ func ValidateAndGetProviderClient(openstackAccessInfo *api.OpenstackAccessInfo) 
 	}
 
 	return providerClient, nil
-}
-
-func GetCert(endpoint string) (*x509.Certificate, error) {
-	conf := &tls.Config{
-		//nolint:gosec // This is required to skip certificate verification
-		InsecureSkipVerify: true,
-	}
-	parsedURL, err := url.Parse(endpoint)
-	if err != nil {
-		return nil, err
-	}
-	hostname := parsedURL.Hostname()
-	conn, err := tls.Dial("tcp", hostname+":443", conf)
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-	cert := conn.ConnectionState().PeerCertificates[0]
-	return cert, nil
 }
 
 // Create in cluster k8s client
