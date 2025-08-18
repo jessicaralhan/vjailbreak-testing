@@ -89,11 +89,23 @@ export default function OpenstackCredentialsDrawer({
     };
 
     const handleRCFileChange = (values: unknown) => {
-        setRcFileValues(values as Record<string, string>);
+        const parsedValues = values as Record<string, string>;
+        setRcFileValues(parsedValues);
         setOpenstackCredsValidated(null);
         setError(null);
-    };
+    
 
+    if (parsedValues.OS_INSECURE !== undefined) {
+        const val = parsedValues.OS_INSECURE.toString().toLowerCase().trim();
+        if (["true", "1", "yes"].includes(val)) {
+            setInsecure(true);
+        } else if (["false", "0", "no"].includes(val)) {
+            setInsecure(false);
+        }
+
+    }
+
+};
     const getApiErrorMessage = (error: unknown): string => {
         if (axios.isAxiosError(error) && typeof error.response?.data?.message === 'string') {
             return error.response.data.message;
